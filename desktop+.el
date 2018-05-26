@@ -328,27 +328,36 @@ from information stored in ARGS, as determined by SAVE-FN."
 Currently, it saves and restores the current working directory.
 
 Environment variables, shell variables and other state are lost."
-  (let* ((beg (save-excursion
-                (end-of-buffer)
-                (forward-line -1000)
-                (beginning-of-line)
-                (point)))
-         (contents (concat
-                    (buffer-substring beg (point-max))
-                    "\n")))
-    (list :dir default-directory
-          :contents contents)))
+  (list default-directory
+        (buffer-substring (point-min) (point-max))
 
-(defun desktop+--shell-restore-buffer (file-name buffer-name misc)
+        (mapcar
+         (lambda (o) (list (overlay-start o)
+                           (overlay-end   o)
+                           (overlay-properties o)))
+         (overlays-in (point-min) (point-max)))))
+
+(defun desktop+--shell-restore-buffer (file-name buffer-name dir-and-contents-and-overlays)
   "Restore a `shell-mode' buffer."
-  (let* ((dir (plist-get misc :dir))
-         (contents (plist-get misc :contents))
+  (let* ((dir      (car   dir-and-contents-and-overlays))
+         (contents (cadr  dir-and-contents-and-overlays))
+         (overlays (caddr dir-and-contents-and-overlays))
          (default-directory (if (file-directory-p dir) dir "/"))
-         (buffer (get-buffer-create "*desktop+ shell*")))
-    (with-current-buffer buffer
+         (buffer (get-buffer-create buffer-name)))
+    (with-current-buffer buffer ;; should barf if this exists already
       (insert contents)
-      (shell buffer)
-      (rename-buffer buffer-name))))
+      (mapc
+       (lambda (o)
+         (let* ((start (car   o))
+                (end   (cadr  o))
+                (props (caddr o))
+                (o (make-overlay start end)))
+           (while (not (null props))
+             (overlay-put o (car props) (cadr props))
+             (setq props (cddr props)))))
+       overlays)
+      (insert "\n")
+      (shell buffer))))
 
 (when (memq 'shell-mode desktop+-special-buffer-handlers)
   (add-hook 'shell-mode-hook 'desktop+--shell-mode-hook)
@@ -404,6 +413,8 @@ Information is kept in the file pointed to by
 `desktop+-desktop+--buffers-file'."
   (when (file-exists-p (desktop+--buffers-file))
     (load-file (desktop+--buffers-file))))
+
+(add-to-list 'desktop-locals-to-save 'comint-input-ring)
 
 (provide 'desktop+)
 
